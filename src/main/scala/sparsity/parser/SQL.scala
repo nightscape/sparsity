@@ -13,25 +13,25 @@ import sparsity.parser.Elements.{keyword => Keyword}
 
 object SQL
 {
-  def apply(input: String) = parse(input, terminatedStatement(_))
-  def apply(input: Reader) = 
+  def apply(input: String): Parsed[Statement] = parse(input, terminatedStatement(_))
+  def apply(input: Reader): StreamParser[Statement] =
     new StreamParser[Statement](
-      parse(_:Iterator[String], terminatedStatement(_), verboseFailures = true), 
+      parse(_:Iterator[String], terminatedStatement(_), verboseFailures = true),
       input
     )
 
-  def terminatedStatement[_:P]: P[Statement] = 
+  def terminatedStatement[$: P]: P[Statement] =
     P( statement ~ ";" )
 
-  def statement[_:P]: P[Statement] = 
-    P( 
-      Pass()~ // This trims off leading whitespace
+  def statement[$: P]: P[Statement] =
+    P(
+      Pass ~ // This trims off leading whitespace
       ( parenthesizedSelect.map { Select(_) }
       | update
       | delete
       | insert
       | (&(Keyword("CREATE")) ~/ (
-            createTable 
+            createTable
           | createView
         ))
       | (&(Keyword("ALTER")) ~/ (
@@ -42,17 +42,17 @@ object SQL
       )
     )
 
-  def explain[_:P] = P(
+  def explain[$: P] = P(
     Keyword("EXPLAIN") ~ select.map { Explain(_) }
   )
 
-  def ifExists[_:P]:P[Boolean] = P(
+  def ifExists[$: P]:P[Boolean] = P(
     (Keyword("IF") ~
       Keyword("EXISTS")
     ).!.?.map { _ != None }
   )
 
-  def alterView[_:P] = P(
+  def alterView[$: P] = P(
     (
       Keyword("ALTER") ~
       Keyword("VIEW") ~/
@@ -65,36 +65,36 @@ object SQL
     ).map { case (name, op) => AlterView(name, op) }
   )
 
-  def dropTableOrView[_:P] = P(
+  def dropTableOrView[$: P] = P(
     (
       Keyword("DROP") ~
       Keyword("TABLE", "VIEW").!.map { _.toUpperCase } ~/
       ifExists ~
       Elements.identifier
-    ).map { 
-      case ("TABLE", ifExists, name) => 
+    ).map {
+      case ("TABLE", ifExists, name) =>
         DropTable(name, ifExists)
-      case ("VIEW", ifExists, name) => 
+      case ("VIEW", ifExists, name) =>
         DropView(name, ifExists)
       case (_, _, _) =>
         throw new Exception("Internal Error")
     }
   )
 
-  def orReplace[_:P]:P[Boolean] = P(
+  def orReplace[$: P]:P[Boolean] = P(
     (Keyword("OR") ~
       Keyword("REPLACE")
     ).!.?.map { _ != None }
   )
 
-  def createView[_:P] = P(
+  def createView[$: P] = P(
     (
       Keyword("CREATE") ~
       orReplace ~
       Keyword(
         "MATERIALIZED",
         "TEMPORARY"
-      ).!.?.map { 
+      ).!.?.map {
         _.map { _.toUpperCase } match {
           case Some("MATERIALIZED") => (true, false)
           case Some("TEMPORARY") => (false, true)
@@ -104,11 +104,11 @@ object SQL
       Elements.identifier ~
       Keyword("AS") ~/
       select
-    ).map { case (orReplace, (materialized, temporary), name, query) => 
+    ).map { case (orReplace, (materialized, temporary), name, query) =>
               CreateView(name, orReplace, query, materialized, temporary) }
   )
 
-  def columnAnnotation[_:P]:P[ColumnAnnotation] = P(
+  def columnAnnotation[$: P]:P[ColumnAnnotation] = P(
     (
       Keyword("PRIMARY") ~/
         Keyword("KEY").map { _ => ColumnIsPrimaryKey() }
@@ -124,26 +124,26 @@ object SQL
     )
   )
 
-  def oneOrMoreAttributes[_:P]:P[Seq[Name]] = P(
+  def oneOrMoreAttributes[$: P]:P[Seq[Name]] = P(
     ( "(" ~/ Elements.identifier.rep(sep = Elements.comma, min = 1) ~ ")")
     | Elements.identifier.map { Seq(_) }
   )
 
-  def tableField[_:P]:P[Either[TableAnnotation,ColumnDefinition]] = P(
+  def tableField[$: P]:P[Either[TableAnnotation,ColumnDefinition]] = P(
     (
       Keyword("PRIMARY") ~/
-        Keyword("KEY") ~ 
+        Keyword("KEY") ~
           oneOrMoreAttributes.map { attrs => Left(TablePrimaryKey(attrs)) }
     ) | (
       Keyword("INDEX") ~/
-        Keyword("ON") ~ 
+        Keyword("ON") ~
           oneOrMoreAttributes.map { attrs => Left(TableIndexOn(attrs)) }
     ) | (
       (
-        Elements.identifier ~/ 
-          Elements.identifier ~ 
+        Elements.identifier ~/
+          Elements.identifier ~
             ( "(" ~
-              ExprParser.primitive.rep( sep = "," ) ~ 
+              ExprParser.primitive.rep( sep = "," ) ~
               ")"
             ).?.map { _.getOrElse(Seq()) } ~
             columnAnnotation.rep
@@ -153,21 +153,21 @@ object SQL
 
   )
 
-  def createTable[_:P] = P(
+  def createTable[$: P] = P(
     (
       Keyword("CREATE") ~
       orReplace ~
       Keyword("TABLE") ~/
       Elements.identifier ~
-      ( 
+      (
         ( Keyword("AS") ~/ select ).map { Left(_) }
         | ( "(" ~/
             tableField.rep(sep = Elements.comma) ~
           ")"
         ).map { Right(_) }
       )
-    ).map { 
-        case (orReplace, table, Left(query)) => 
+    ).map {
+        case (orReplace, table, Left(query)) =>
           CreateTableAs(table, orReplace, query)
         case (orReplace, table, Right(fields)) =>
           val columns = fields.collect { case Right(r) => r }
@@ -176,14 +176,14 @@ object SQL
     }
   )
 
-  def valueList[_:P]: P[InsertValues] = P(
+  def valueList[$: P]: P[InsertValues] = P(
     (
       Keyword("VALUES") ~/
       ("(" ~/ ExprParser.expressionList ~ ")").rep(sep = Elements.comma)
     ).map { ExplicitInsert(_) }
   )
 
-  def insert[_:P] = P(
+  def insert[$: P] = P(
     (
       Keyword("INSERT") ~/
       (
@@ -191,21 +191,21 @@ object SQL
         Keyword("REPLACE")
       ).!.?.map { case None => false; case _ => true } ~
       Keyword("INTO") ~/
-      Elements.identifier ~ 
+      Elements.identifier ~
       (("(" ~/
         Elements.identifier ~
         (Elements.comma ~/ Elements.identifier).rep ~
-      ")").map { x => Seq(x._1)++x._2 }).? ~ 
+      ")").map { x => Seq(x._1)++x._2 }).? ~
       (
           (&(Keyword("SELECT")) ~/ select.map { SelectInsert(_) })
         | (&(Keyword("VALUES")) ~/ valueList)
       )
-    ).map { case (orReplace, table, columns, values) => 
+    ).map { case (orReplace, table, columns, values) =>
       Insert(table, columns, values, orReplace)
     }
   )
 
-  def delete[_:P] = P(
+  def delete[$: P] = P(
     (
       Keyword("DELETE") ~/
       Keyword("FROM") ~/
@@ -217,12 +217,12 @@ object SQL
     ).map { case (table, where) => Delete(table, where) }
   )
 
-  def update[_:P] = P(
+  def update[$: P] = P(
     (
-      Keyword("UPDATE") ~/ 
-      Elements.identifier ~ 
+      Keyword("UPDATE") ~/
+      Elements.identifier ~
       Keyword("SET") ~/
-      ( 
+      (
         Elements.identifier ~
         "=" ~/
         ExprParser.expression
@@ -231,47 +231,47 @@ object SQL
         StringInIgnoreCase("WHERE") ~/
         ExprParser.expression
       ).?
-    ).map { 
+    ).map {
       case (table, set, where) =>
         Update(
-          table, 
-          set, 
+          table,
+          set,
           where
         )
     }
   )
 
-  def alias[_:P]: P[Name] = P(
+  def alias[$: P]: P[Name] = P(
     Keyword("AS").? ~ Elements.identifier
   )
 
-  def selectTarget[_:P]: P[SelectTarget] = P(
-      P("*").map { _ => SelectAll() } 
+  def selectTarget[$: P]: P[SelectTarget] = P(
+      P("*").map { _ => SelectAll() }
       // Dotted wildcard needs a lookahead since a single token isn't
       // enough to distinguish between `foo`.* and `foo` AS `bar`
-    | ( &(Elements.dottedWildcard) ~ 
+    | ( &(Elements.dottedWildcard) ~
           Elements.dottedWildcard.map { SelectTable(_) } )
-    | ( ExprParser.expression ~ alias.?).map 
+    | ( ExprParser.expression ~ alias.?).map
         { x => SelectExpression(x._1, x._2) }
   )
 
-  def simpleFromElement[_:P]: P[FromElement] = P(
+  def simpleFromElement[$: P]: P[FromElement] = P(
       (("(" ~ select ~ ")" ~ alias).map { x => FromSelect(x._1, x._2) })
-    | ((Elements.dottedPair ~ alias.?).map { 
+    | ((Elements.dottedPair ~ alias.?).map {
         case (schema, table, alias) => FromTable(schema, table, alias)
       })
-    | (("(" ~ fromElement ~ ")" ~ alias.?).map { 
+    | (("(" ~ fromElement ~ ")" ~ alias.?).map {
         case (from, None)        => from
         case (from, Some(alias)) => from.withAlias(alias)
       })
   )
 
-  def joinWith[_:P]: P[Join.Type] = P(
-      Keyword("JOIN").map { Unit => Join.Inner } 
+  def joinWith[$: P]: P[Join.Type] = P(
+      Keyword("JOIN").map { Unit => Join.Inner }
     | ( (
           Keyword("NATURAL").!.map { Unit => Join.Natural}
         | Keyword("INNER").map { Unit => Join.Inner }
-        | ( ( 
+        | ( (
                 Keyword("LEFT").map { Unit => Join.LeftOuter }
               | Keyword("RIGHT").map { Unit => Join.RightOuter }
               | Keyword("FULL").map { Unit => Join.FullOuter }
@@ -282,7 +282,7 @@ object SQL
       )
   )
 
-  def fromElement[_:P]: P[FromElement] = P(
+  def fromElement[$: P]: P[FromElement] = P(
     (
       simpleFromElement ~ (
         &(joinWith) ~
@@ -293,91 +293,91 @@ object SQL
           ExprParser.expression
         ).? ~
         alias.?
-      ).rep 
-    ).map { case (lhs, rest) => 
+      ).rep
+    ).map { case (lhs, rest) =>
       rest.foldLeft(lhs) { (lhs, next) =>
         val (t, rhs, onClause, alias) = next
         FromJoin(
-          lhs, 
-          rhs, 
-          t, 
-          onClause.getOrElse(BooleanPrimitive(true)), 
+          lhs,
+          rhs,
+          t,
+          onClause.getOrElse(BooleanPrimitive(true)),
           alias
         )
       }
     }
   )
 
-  def fromClause[_:P] = P(
-    Keyword("FROM") ~/ 
+  def fromClause[$: P] = P(
+    Keyword("FROM") ~/
       fromElement.rep(sep = Elements.comma, min=1)
   )
 
-  def whereClause[_:P] = P(
+  def whereClause[$: P] = P(
     Keyword("WHERE") ~/ ExprParser.expression
   )
 
-  def groupByClause[_:P] = P(
+  def groupByClause[$: P] = P(
     Keyword("GROUP") ~/
     Keyword("BY") ~/
     ExprParser.expressionList
   )
 
-  def havingClause[_:P] = P(
+  def havingClause[$: P] = P(
     Keyword("HAVING") ~ ExprParser.expression
   )
 
   def options[A](default: A, options: Map[String, A]): (Option[String] => A) =
     _.map { _.toUpperCase }.map { options(_) }.getOrElse(default)
 
-  def ascOrDesc[_:P] = P(
-    Keyword("ASC", "DESC").!.?.map { 
+  def ascOrDesc[$: P] = P(
+    Keyword("ASC", "DESC").!.?.map {
       options(true, Map("ASC" -> true, "DESC"-> false))
     }
   )
 
-  def orderBy[_:P] = P(
+  def orderBy[$: P] = P(
     ( ExprParser.expression ~ ascOrDesc ).map { x => OrderBy(x._1, x._2) }
   )
 
-  def orderByClause[_:P] = P(
+  def orderByClause[$: P] = P(
     Keyword("ORDER") ~/
       Keyword("BY") ~/
         orderBy.rep(sep = Elements.comma, min = 1)
   )
 
-  def limitClause[_:P] = P(
+  def limitClause[$: P] = P(
     Keyword("LIMIT") ~/
     Elements.integer
   )
 
-  def offsetClause[_:P] = P(
+  def offsetClause[$: P] = P(
     Keyword("OFFSET") ~/
     Elements.integer
   )
 
-  def allOrDistinct[_:P] = P(
-    Keyword("ALL", "DISTINCT").!.?.map { 
+  def allOrDistinct[$: P] = P(
+    Keyword("ALL", "DISTINCT").!.?.map {
       options(Union.Distinct, Map("ALL" -> Union.All, "DISTINCT"-> Union.Distinct))
     }
   )
 
-  def unionClause[_:P] = P(
+  def unionClause[$: P] = P(
     (Keyword("UNION") ~/ allOrDistinct ~/ parenthesizedSelect)
   )
 
-  def parenthesizedSelect[_:P]: P[SelectBody] = P(
+  def parenthesizedSelect[$: P]: P[SelectBody] = P(
     (
       "(" ~/ select ~ ")" ~/ unionClause.?
-    ).map { 
-      case (body, Some((unionType, unionBody))) => body.unionWith(unionType, unionBody) 
+    ).map {
+      case (body, Some((unionType, unionBody))) => body.unionWith(unionType, unionBody)
       case (body, None) => body
     } | select
   )
 
-  def select[_:P]: P[SelectBody] = P( 
+  def select[$: P]: P[SelectBody] = P(
     (
-      Keyword("SELECT") ~/ 
+      Keyword("SELECT") ~/
       Keyword("DISTINCT").!.?.map { _ != None } ~/
       selectTarget.rep(sep = ",") ~
       fromClause.?.map { _.toSeq.flatten } ~
@@ -388,7 +388,7 @@ object SQL
       limitClause.? ~
       offsetClause.? ~
       unionClause.?
-    ).map { case (distinct, targets, froms, where, groupBy, having, orderBy, limit, offset, union) => 
+    ).map { case (distinct, targets, froms, where, groupBy, having, orderBy, limit, offset, union) =>
       SelectBody(
         distinct = distinct,
         target = targets,
